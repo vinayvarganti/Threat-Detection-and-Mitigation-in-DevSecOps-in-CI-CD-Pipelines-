@@ -1,0 +1,55 @@
+{
+  "name": "devsecops-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for DevSecOps Platform",
+  "private": true,
+  "dependencies": {
+    "@emotion/react": "^11.10.5",
+    "@emotion/styled": "^11.10.5",
+    "@mui/icons-material": "^5.11.0",
+    "@mui/material": "^5.11.0",
+    "@mui/x-charts": "^6.0.0",
+    "@mui/x-data-grid": "^6.0.0",
+    "axios": "^1.2.0",
+    "date-fns": "^2.29.0",
+    "file-saver": "^2.0.5",
+    "lodash": "^4.17.21",
+    "prismjs": "^1.29.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-dropzone": "^14.3.8",
+    "react-hook-form": "^7.41.0",
+    "react-query": "^3.39.0",
+    "react-router-dom": "^6.6.0",
+    "react-scripts": "5.0.1",
+    "react-syntax-highlighter": "^15.5.0",
+    "react-toastify": "^9.1.0",
+    "recharts": "^2.5.0",
+    "socket.io-client": "^4.6.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "proxy": "http://localhost:5000"
+}

@@ -1,0 +1,29 @@
+{
+  "name": "devsecops-platform",
+  "version": "1.0.0",
+  "description": "Proactive Threat Detection and Mitigation in DevSecOps Pipelines",
+  "main": "index.js",
+  "scripts": {
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../ai-module && pip install -r requirements.txt",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\" \"npm run start:ai\"",
+    "start:backend": "npm start --prefix backend",
+    "start:frontend": "npm start --prefix frontend",
+    "start:ai": "cd ai-module && venv\\\\Scripts\\\\python app.py",
+    "build": "cd frontend && npm run build",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "cd backend && npm test",
+    "test:frontend": "cd frontend && npm test"
+  },
+  "keywords": [
+    "devsecops",
+    "security",
+    "ci-cd",
+    "threat-detection",
+    "vulnerability-scanning"
+  ],
+  "author": "DevSecOps Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^7.6.0"
+  }
+}

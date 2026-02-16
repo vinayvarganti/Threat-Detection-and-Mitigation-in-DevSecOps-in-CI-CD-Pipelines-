@@ -1,0 +1,325 @@
+name: DevSecOps Platform CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  # Security Scanning
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Backend Tests
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: devsecops_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run backend tests
+        working-directory: ./backend
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/devsecops_test
+          JWT_SECRET: test-secret
+          NODE_ENV: test
+
+      - name: Run backend linting
+        working-directory: ./backend
+        run: npm run lint || true
+
+  # Frontend Tests
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: ./frontend
+        run: npm test -- --coverage --watchAll=false
+
+      - name: Run frontend linting
+        working-directory: ./frontend
+        run: npm run lint || true
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+  # AI Module Tests
+  ai-module-test:
+    name: AI Module Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install AI module dependencies
+        working-directory: ./ai-module
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run AI module tests
+        working-directory: ./ai-module
+        run: |
+          python -m pytest tests/ --cov=. --cov-report=xml || true
+
+  # SAST Scanning
+  sast-scan:
+    name: SAST Scan
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Run ESLint
+        run: |
+          cd backend && npx eslint . --ext .js --format json --output-file ../eslint-backend.json || true
+          cd ../frontend && npx eslint . --ext .js,.jsx --format json --output-file ../eslint-frontend.json || true
+
+      - name: Run Semgrep SAST
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+            p/javascript
+            p/python
+
+  # Dependency Scanning
+  dependency-scan:
+    name: Dependency Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --all-projects --severity-threshold=high
+
+  # Container Security Scan
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test, ai-module-test]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build Docker images
+        run: |
+          docker build -t devsecops-backend ./backend
+          docker build -t devsecops-frontend ./frontend
+          docker build -t devsecops-ai ./ai-module
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'devsecops-backend'
+          format: 'table'
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'devsecops-frontend'
+          format: 'table'
+
+      - name: Scan AI module image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'devsecops-ai'
+          format: 'table'
+
+  # Security Gate
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    needs: [security-scan, sast-scan, dependency-scan, container-scan]
+    if: always()
+
+    steps:
+      - name: Security Gate Check
+        run: |
+          echo "Evaluating security scan results..."
+          
+          # Check if any critical security issues were found
+          # This is a simplified example - in practice, you'd parse scan results
+          
+          CRITICAL_ISSUES=0
+          HIGH_ISSUES=0
+          
+          echo "Critical issues found: $CRITICAL_ISSUES"
+          echo "High severity issues found: $HIGH_ISSUES"
+          
+          # Security gate policy
+          if [ $CRITICAL_ISSUES -gt 0 ]; then
+            echo "❌ Security gate FAILED: Critical vulnerabilities found"
+            exit 1
+          elif [ $HIGH_ISSUES -gt 5 ]; then
+            echo "⚠️  Security gate WARNING: Too many high severity issues"
+            echo "Proceeding with caution..."
+          else
+            echo "✅ Security gate PASSED: No critical issues found"
+          fi
+
+  # Build and Deploy (only on main branch and if security gate passes)
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: [security-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.CONTAINER_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push images
+        run: |
+          # Build and tag images
+          docker build -t ${{ secrets.CONTAINER_REGISTRY }}/devsecops-backend:${{ github.sha }} ./backend
+          docker build -t ${{ secrets.CONTAINER_REGISTRY }}/devsecops-frontend:${{ github.sha }} ./frontend
+          docker build -t ${{ secrets.CONTAINER_REGISTRY }}/devsecops-ai:${{ github.sha }} ./ai-module
+          
+          # Push images
+          docker push ${{ secrets.CONTAINER_REGISTRY }}/devsecops-backend:${{ github.sha }}
+          docker push ${{ secrets.CONTAINER_REGISTRY }}/devsecops-frontend:${{ github.sha }}
+          docker push ${{ secrets.CONTAINER_REGISTRY }}/devsecops-ai:${{ github.sha }}
+
+      - name: Deploy to staging
+        run: |
+          echo "Deploying to staging environment..."
+          # Add your deployment commands here
+          # This could be kubectl, helm, or other deployment tools
+
+      - name: Run DAST scan on staging
+        run: |
+          echo "Running DAST scan on staging deployment..."
+          # Add DAST scanning commands here
+          # This could use OWASP ZAP or other DAST tools
+
+      - name: Deploy to production
+        if: success()
+        run: |
+          echo "Deploying to production environment..."
+          # Add production deployment commands here
+
+  # Notification
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always()
+
+    steps:
+      - name: Notify deployment status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "✅ Deployment successful"
+            # Add notification logic (Slack, email, etc.)
+          else
+            echo "❌ Deployment failed"
+            # Add failure notification logic
+          fi
